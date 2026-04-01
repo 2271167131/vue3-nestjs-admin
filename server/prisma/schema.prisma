@@ -1,0 +1,19 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 连接你的 MySQL 数据库
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// 定义用户模型（存储账号密码）
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique // 用户名唯一
+  password  String   // 加密后的密码
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
