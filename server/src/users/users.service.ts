@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service'; // 路径必须正确
 import { JwtService } from '@nestjs/jwt';
 import { RegisterDto } from './dto/register.dto';
@@ -22,7 +22,7 @@ export class UsersService {
     });
 
     if (existingUser) {
-      throw new Error('用户名已存在');
+      throw new BadRequestException('用户名已存在');
     }
 
     // 2. 加密密码
@@ -41,69 +41,88 @@ export class UsersService {
   async login(username: string, password: string) {
     // 1. 查用户
     const user = await this.prisma.user.findUnique({ where: { username } });
-    if (!user) throw new Error('用户不存在');
+    if (!user) throw new UnauthorizedException('用户不存在');
 
     // 2. 验密码
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) throw new Error('账号密码错误');
+    if (!isPasswordValid) throw new UnauthorizedException('账号密码错误');
 
     // 3. 发 token
     const token = this.jwtService.sign({ username: user.username });
     return { token, username: user.username };
   }
 
-  // 新增获取所有用户的方法
-  async getUserList() {
-    // 查所有用户，排除密码字段（安全！）
-    return this.prisma.user.findMany({
-      select: {
-        id: true,
-        username: true,
-        createdAt: true, // 创建时间
-        updatedAt: true  // 更新时间
-      }
-    });
+  async getUserList(params?: { page?: number; pageSize?: number; keyword?: string }) {
+    const page = Math.max(1, Number(params?.page || 1));
+    const pageSize = Math.min(100, Math.max(1, Number(params?.pageSize || 10)));
+    const keyword = (params?.keyword || '').trim();
+
+    const where = keyword
+      ? {
+          username: {
+            contains: keyword,
+          },
+        }
+      : undefined;
+
+    const [total, list] = await Promise.all([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          username: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { id: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    return { list, total, page, pageSize };
   }
 
   // 新增删除用户方法
   async deleteUser(id: number) {
     // 先检查用户是否存在
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new Error('用户不存在');
+    if (!user) throw new NotFoundException('用户不存在');
 
     // 删除用户
     await this.prisma.user.delete({ where: { id } });
     return { message: '删除成功' };
   }
 
-   // 新增修改密码方法（重点：从token取当前登录用户，而非固定admin）
-  async changePassword(oldPwd: string, newPwd: string) {
-    try {
-      // 🔥 修复：不要固定查 admin，先查当前登录用户（这里简化，实际从token解析）
-      // 如果你还没做token解析用户，先临时查第一个用户（测试用）
-      const user = await this.prisma.user.findFirst();
-      if (!user) {
-        return { code: 404, message: '用户不存在' };
-      }
+  async getProfile(username: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { username },
+      select: { id: true, username: true, createdAt: true, updatedAt: true }
+    });
 
-      // 验证旧密码
-      const isMatch = await bcrypt.compare(oldPwd, user.password);
-      if (!isMatch) {
-        return { code: 400, message: '旧密码错误' };
-      }
+    if (!user) throw new NotFoundException('用户不存在');
+    return user;
+  }
 
-      // 加密新密码
-      const hashedNewPwd = await bcrypt.hash(newPwd, 10);
-      // 更新密码
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { password: hashedNewPwd }
-      });
+  // 修改当前登录用户的密码（基于 token 里的 username）
+  async changePassword(username: string, oldPwd: string, newPwd: string) {
+    const user = await this.prisma.user.findUnique({ where: { username } });
+    if (!user) throw new NotFoundException('用户不存在');
 
-      return { code: 200, message: '密码修改成功，请重新登录' };
-    } catch (err) {
-      console.error('修改密码失败：', err);
-      return { code: 500, message: '服务器错误，修改密码失败' };
-    }
+    // 验证旧密码
+    const isMatch = await bcrypt.compare(oldPwd, user.password);
+    if (!isMatch) throw new BadRequestException('旧密码错误');
+
+    // 加密新密码
+    const hashedNewPwd = await bcrypt.hash(newPwd, 10);
+
+    // 更新密码
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedNewPwd }
+    });
+
+    return { code: 200, message: '密码修改成功，请重新登录' };
   }
 }

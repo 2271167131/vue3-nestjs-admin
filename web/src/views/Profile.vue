@@ -39,12 +39,23 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import request from '@/utils/request'
 
 const router = useRouter()
 const username = ref('')
 
 onMounted(() => {
-  username.value = localStorage.getItem('username') || '未知用户'
+  const fallback = localStorage.getItem('username') || '未知用户'
+  username.value = fallback
+  request
+    .get('/users/profile')
+    .then((res) => {
+      username.value = res.username || fallback
+    })
+    .catch((err) => {
+      console.error('获取个人信息失败：', err)
+      ElMessage.error('获取个人信息失败')
+    })
 })
 
 const goBack = () => {

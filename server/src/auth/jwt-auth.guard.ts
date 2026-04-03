@@ -14,7 +14,10 @@ export class JwtAuthGuard implements CanActivate {
     if (!token) throw new UnauthorizedException('请先登录');
 
     try {
-      this.jwtService.verify(token);
+      const payload = this.jwtService.verify(token);
+      // 把 payload 挂到 request 上，后续 Controller/Service 可以直接取当前登录用户
+      // payload 形如：{ username: string, iat: number, exp: number }
+      (request as any).user = payload;
     } catch {
       throw new UnauthorizedException('登录已过期，请重新登录');
     }

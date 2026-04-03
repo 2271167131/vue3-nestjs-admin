@@ -62,19 +62,6 @@ const handleRegister = async () => {
     const valid = await registerFormRef.value.validate()
     if (!valid) return
 
-    // 新增：先检查用户名是否已存在
-    try {
-        const res = await request.get('/users/list');
-        const isExist = res.some(user => user.username === registerForm.value.username);
-        if (isExist) {
-            ElMessage.error('用户名已存在，请换一个！');
-            return;
-        }
-    } catch (err) {
-        ElMessage.error('检查用户名失败，请重试');
-        return;
-    }
-
     isLoading.value = true
     try {
         // 调用后端注册接口
@@ -85,8 +72,8 @@ const handleRegister = async () => {
             router.push('/login')
         }, 1500)
     } catch (err) {
-        ElMessage.error('注册失败：用户名已存在或格式错误')
-        console.error(err)
+        const msg = err.response?.data?.message || '注册失败：用户名已存在或格式错误'
+        ElMessage.error(msg)
     } finally {
         isLoading.value = false
     }
